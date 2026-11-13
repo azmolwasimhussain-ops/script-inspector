@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/azmolwasimhussain-ops/script-inspector.git"
+    "url": "git+https://github.com/azmolwasimhussain-ops/script-inspector.git"
   },
   "bugs": {
     "url": "https://github.com/azmolwasimhussain-ops/script-inspector/issues"
@@ -21,7 +21,7 @@
     }
   },
   "bin": {
-    "script-inspector": "./bin/script-inspector.js"
+    "script-inspector": "bin/script-inspector.js"
   },
   "files": [
     "bin",
