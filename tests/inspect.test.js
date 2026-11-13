@@ -89,8 +89,8 @@ test("checks quoted absolute Node entry paths", async () => {
   );
 
   const report = await inspectProject(directory);
-  assert.equal(report.summary.errors, 0);
-  assert.equal(report.findings.length, 0);
+  assert.equal(report.summary.errors, 0, JSON.stringify(report.findings));
+  assert.equal(report.findings.length, 0, JSON.stringify(report.findings));
 });
 
 test("deduplicates repeated findings for the same script and target", async () => {

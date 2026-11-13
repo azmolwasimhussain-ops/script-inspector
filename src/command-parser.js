@@ -366,8 +366,15 @@ function normalizePath(target) {
   return target.replace(/[\\/]+/g, path.sep);
 }
 
+function isWindowsAbsolutePath(target) {
+  return /^[A-Za-z]:[\\/]/.test(target) || /^\\\\/.test(target);
+}
+
 function isDynamicPath(target) {
-  return isDynamicValue(target) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target);
+  return (
+    isDynamicValue(target) ||
+    (!isWindowsAbsolutePath(target) && /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target))
+  );
 }
 
 function isWindowsStylePath(target) {
