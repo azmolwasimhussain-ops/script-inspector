@@ -6,6 +6,8 @@ It reads the package manifest and checks referenced paths. **It never executes n
 
 [GitHub repository](https://github.com/azmolwasimhussain-ops/script-inspector) · [Report an issue](https://github.com/azmolwasimhussain-ops/script-inspector/issues)
 
+[Contributing](https://github.com/azmolwasimhussain-ops/script-inspector/blob/main/CONTRIBUTING.md) · [Security policy](https://github.com/azmolwasimhussain-ops/script-inspector/blob/main/SECURITY.md)
+
 ## Features
 
 - Detects missing files referenced by common `node` commands.
@@ -143,12 +145,14 @@ An absent `scripts` section is informational. An invalid `scripts` value or a no
 The analyzer recognizes common, simple forms, including:
 
 - `node src/index.js` and Node entry paths after common Node options.
+- Relative or absolute Node entry paths, including quoted paths with spaces.
+- Node.js `--run` script targets.
 - `npm run build` and `npm run-script build`.
 - `cd scripts && node build.js` when `scripts` exists.
 - Simple command separators such as `&&`, `||`, `|`, and POSIX `;`.
 - A curated set of common CLI binaries, including ESLint, Jest, TypeScript, Vite, Vitest, and Webpack.
 
-Dynamic npm script names such as `npm run "$TARGET"` cannot be checked for a specific target. They receive a warning instead of a false missing-script error. npm options that select another package, such as `--workspace` or `--prefix`, are reported as inconclusive.
+Dynamic npm script names such as `npm run "$TARGET"` cannot be checked for a specific target. They receive a warning instead of a false missing-script error. Only npm's `run`/`run-script` and Node.js `--run` forms are checked against this package's scripts. Common `pnpm run`, `yarn run`, and `bun run` commands are reported as inconclusive; their package-specific options and shorthand forms are not interpreted. npm options that select another package or shell, such as `--workspace`, `--prefix`, and `--script-shell`, are also reported as inconclusive.
 
 Windows-style relative paths such as `node .\\src\\index.js` are checked on Windows. On POSIX systems these paths are reported as inconclusive because backslashes have different shell meanings. This project does not provide complete Windows `cmd.exe`, PowerShell, POSIX shell, or shell-expansion compatibility.
 
