@@ -1,0 +1,45 @@
+{
+  "name": "script-inspector",
+  "version": "0.1.0",
+  "description": "Inspect package.json scripts for common Node.js setup issues without running them.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/azmolwasimhussain-ops/script-inspector.git"
+  },
+  "bugs": {
+    "url": "https://github.com/azmolwasimhussain-ops/script-inspector/issues"
+  },
+  "homepage": "https://github.com/azmolwasimhussain-ops/script-inspector#readme",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "bin": {
+    "script-inspector": "./bin/script-inspector.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "npm",
+    "package-json",
+    "scripts",
+    "cli",
+    "developer-tools"
+  ],
+  "scripts": {
+    "test": "node --test"
+  }
+}
