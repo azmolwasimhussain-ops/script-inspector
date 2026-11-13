@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { afterEach, test } = require("node:test");
 const { inspectProject } = require("../src");
+const { BINARIES_TO_PACKAGES } = require("../src/command-parser.js");
 
 const temporaryDirectories = [];
 
@@ -36,7 +37,8 @@ test("accepts correctly configured Node entries and declared CLI tools", async (
   const directory = await createProject(
     {
       name: "sample",
-      scripts: { dev: "node src/index.js", lint: "eslint ." },
+      scripts: { dev: "node src/index.js", lint: "eslint .", build: "vite build" },
+      dependencies: { vite: "^6.0.0" },
       devDependencies: { eslint: "^9.0.0" }
     },
     { "src/index.js": "console.log('ready')" }
@@ -75,12 +77,63 @@ test("checks quoted Node entry paths that contain spaces", async () => {
   assert.equal(report.findings.length, 0);
 });
 
+test("checks quoted absolute Node entry paths", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "script-inspector-absolute-"));
+  temporaryDirectories.push(directory);
+  const entryPath = path.join(directory, "source folder", "entry file.js");
+  await mkdir(path.dirname(entryPath), { recursive: true });
+  await writeFile(entryPath, "");
+  await writeFile(
+    path.join(directory, "package.json"),
+    JSON.stringify({ scripts: { start: `node "${entryPath}"` } })
+  );
+
+  const report = await inspectProject(directory);
+  assert.equal(report.summary.errors, 0);
+  assert.equal(report.findings.length, 0);
+});
+
+test("deduplicates repeated findings for the same script and target", async () => {
+  const directory = await createProject({ scripts: { build: "node missing.js && node missing.js" } });
+  const report = await inspectProject(directory);
+
+  assert.equal(report.findings.filter((finding) => finding.code === "node-entry-not-found").length, 1);
+  assert.equal(report.summary.errors, 1);
+});
+
+for (const [binary, packageName] of BINARIES_TO_PACKAGES) {
+  test(`maps ${binary} to the expected package dependency`, async () => {
+    const directory = await createProject({ scripts: { check: `${binary} --version` } });
+    const report = await inspectProject(directory);
+    const finding = report.findings.find((item) => item.code === "cli-dependency-not-declared");
+
+    assert.ok(finding, `expected ${binary} to be checked`);
+    assert.equal(finding.target, packageName);
+  });
+}
+
 test("reports a missing npm run target", async () => {
   const directory = await createProject({ scripts: { deploy: "npm run build" } });
   const report = await inspectProject(directory);
 
   assert.equal(report.findings[0].code, "npm-script-not-found");
   assert.match(report.findings[0].message, /build/);
+});
+
+test("recognizes npm run after global flags without mistaking install arguments", async () => {
+  const directory = await createProject({
+    scripts: {
+      wrongSubcommand: "npm install run missing",
+      missingTarget: "npm --silent run missing"
+    }
+  });
+  const report = await inspectProject(directory);
+
+  assert.equal(
+    report.findings.filter((finding) => finding.code === "npm-script-not-found").length,
+    1
+  );
+  assert.equal(report.findings.find((finding) => finding.code === "npm-script-not-found").script, "missingTarget");
 });
 
 test("reports an empty npm script command", async () => {
@@ -160,6 +213,33 @@ test("does not report a dynamic npm script name as missing", async () => {
   assert.equal(report.summary.errors, 0);
 });
 
+test("checks Node's built-in --run script targets", async () => {
+  const directory = await createProject(
+    {
+      scripts: {
+        missing: "node --run absent",
+        dynamic: 'node --run "$TARGET"',
+        existing: "node --run=build",
+        requiredBeforeRun: "node --require ./setup.js --run=build",
+        forwardedArguments: "node --run build -- missing.js",
+        inlineCode: 'node --eval="console.log(1)" --run absent',
+        argument: "node app.js --run absent",
+        build: "echo build"
+      }
+    },
+    { "app.js": "", "setup.js": "" }
+  );
+  const report = await inspectProject(directory);
+
+  assert.equal(
+    report.findings.filter((finding) => finding.code === "node-run-script-not-found").length,
+    1
+  );
+  assert.ok(report.findings.some((finding) => finding.code === "node-run-script-dynamic"));
+  assert.equal(report.findings.some((finding) => finding.code === "npm-script-not-found"), false);
+  assert.equal(report.findings.some((finding) => finding.code === "node-entry-not-found"), false);
+});
+
 test("recognizes percent-delimited dynamic npm script names", async () => {
   const directory = await createProject({ scripts: { start: "npm run %TARGET%" } });
   const report = await inspectProject(directory);
@@ -177,10 +257,30 @@ test("does not report an absent optional npm script as an error", async () => {
 });
 
 test("reports package-selecting npm options as inconclusive", async () => {
-  const directory = await createProject({ scripts: { deploy: "npm --prefix ./other run deploy" } });
+  const directory = await createProject({
+    scripts: {
+      deploy: "npm --prefix ./other run deploy",
+      workspaceDeploy: "npm run deploy --workspace app",
+      packageInstall: "npm --prefix ./other install"
+    }
+  });
   const report = await inspectProject(directory);
 
-  assert.ok(report.findings.some((finding) => finding.code === "analysis-inconclusive"));
+  assert.equal(report.findings.filter((finding) => finding.code === "analysis-inconclusive").length, 2);
+  assert.equal(report.findings.some((finding) => finding.code === "npm-script-not-found"), false);
+});
+
+test("reports alternative package-manager run commands as inconclusive", async () => {
+  const directory = await createProject({
+    scripts: {
+      pnpm: "pnpm --silent run missing",
+      yarn: "yarn --cwd . run missing",
+      bun: "bun --cwd . run missing"
+    }
+  });
+  const report = await inspectProject(directory);
+
+  assert.equal(report.findings.filter((finding) => finding.code === "analysis-inconclusive").length, 3);
   assert.equal(report.findings.some((finding) => finding.code === "npm-script-not-found"), false);
 });
 
@@ -213,6 +313,17 @@ test("checks Node entries and npm scripts after a simple cd", async () => {
   assert.ok(report.findings.some((finding) => finding.code === "node-entry-not-found" && finding.target === "absent.js"));
   assert.ok(report.findings.some((finding) => finding.code === "npm-script-not-found" && finding.target === "missing"));
   assert.equal(report.findings.some((finding) => finding.code === "analysis-inconclusive"), false);
+});
+
+test("does not assume a cd after || always changes the working directory", async () => {
+  const directory = await createProject(
+    { scripts: { start: "true || cd scripts && node entry.js" } },
+    { "entry.js": "", "scripts/other.js": "" }
+  );
+  const report = await inspectProject(directory);
+
+  assert.ok(report.findings.some((finding) => finding.code === "analysis-inconclusive"));
+  assert.equal(report.findings.some((finding) => finding.code === "node-entry-not-found"), false);
 });
 
 test("reports an inconclusive warning when cd uses a dynamic directory", async () => {

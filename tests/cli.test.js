@@ -26,8 +26,34 @@ function runCli(directory, ...argumentsList) {
   return spawnSync(process.execPath, [cliPath, directory, ...argumentsList], { encoding: "utf8" });
 }
 
+function runCliArguments(...argumentsList) {
+  return spawnSync(process.execPath, [cliPath, ...argumentsList], { encoding: "utf8" });
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
+
+test("prints help and version without inspecting a project", () => {
+  const help = runCliArguments("--help");
+  const version = runCliArguments("--version");
+
+  assert.equal(help.status, 0);
+  assert.match(help.stdout, /Usage:\n/);
+  assert.equal(version.status, 0);
+  assert.equal(version.stdout.trim(), require("../package.json").version);
+});
+
+test("returns code 2 for unknown options and multiple project paths", async () => {
+  const firstProject = await createProject({ scripts: {} });
+  const secondProject = await createProject({ scripts: {} });
+  const unknownOption = runCliArguments("--not-an-option");
+  const multiplePaths = runCliArguments(firstProject, secondProject);
+
+  assert.equal(unknownOption.status, 2);
+  assert.match(unknownOption.stderr, /Unknown option/);
+  assert.equal(multiplePaths.status, 2);
+  assert.match(multiplePaths.stderr, /Only one project path/);
 });
 
 test("prints findings and returns code 1 for script errors", async () => {
@@ -66,6 +92,26 @@ test("keeps human-readable output safe from terminal control characters", async 
   assert.equal(result.status, 0);
   assert.equal(result.stdout.includes("\u001b"), false);
   assert.match(result.stdout, /\\u001b/);
+});
+
+test("does not print environment assignment values in JSON or human output", async () => {
+  const secret = "script-inspector-cli-secret-value";
+  const directory = await createProject({ scripts: { start: `API_TOKEN=${secret} node app.js` } });
+  const json = runCli(directory, "--json");
+  const human = runCli(directory);
+
+  assert.equal(json.stdout.includes(secret), false);
+  assert.equal(human.stdout.includes(secret), false);
+});
+
+test("does not echo sensitive content from an invalid package.json", async () => {
+  const secret = "script-inspector-invalid-json-secret";
+  const source = `{"scripts":{"start":"API_TOKEN=${secret}"},}`;
+  const directory = await createProjectWithRawPackageJson(source);
+  const result = runCli(directory, "--json");
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout.includes(secret), false);
 });
 
 test("does not execute analyzed scripts when run through the CLI", async () => {
