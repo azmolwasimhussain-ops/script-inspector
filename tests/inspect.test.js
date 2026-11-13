@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { access, mkdtemp, mkdir, rm, writeFile } = require("node:fs/promises");
+const { access, mkdtemp, mkdir, rm, symlink, writeFile } = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { afterEach, test } = require("node:test");
@@ -44,7 +44,7 @@ test("accepts correctly configured Node entries and declared CLI tools", async (
 
   const report = await inspectProject(directory);
   assert.equal(report.fatal, false);
-  assert.deepEqual(report.summary, { errors: 0, warnings: 0 });
+  assert.deepEqual(report.summary, { errors: 0, warnings: 0, infos: 0 });
 });
 
 test("reports a missing Node entry file as an error", async () => {
@@ -62,6 +62,17 @@ test("reports a missing file inside nested directories", async () => {
 
   assert.ok(report.findings.some((finding) => finding.code === "node-entry-not-found"));
   assert.equal(report.findings[0].target, "src/deep/missing.js");
+});
+
+test("checks quoted Node entry paths that contain spaces", async () => {
+  const directory = await createProject(
+    { scripts: { start: 'node "src folder/index.js"' } },
+    { "src folder/index.js": "console.log('ready')" }
+  );
+  const report = await inspectProject(directory);
+
+  assert.equal(report.summary.errors, 0);
+  assert.equal(report.findings.length, 0);
 });
 
 test("reports a missing npm run target", async () => {
@@ -96,11 +107,14 @@ test("warns when a recognized CLI dependency is not declared", async () => {
   assert.equal(report.findings[0].target, "vite");
 });
 
-test("warns about POSIX environment assignments", async () => {
-  const directory = await createProject({ scripts: { start: "NODE_ENV=production node app.js" } });
+test("does not expose values from POSIX environment assignments", async () => {
+  const secret = "script-inspector-test-secret";
+  const directory = await createProject({ scripts: { start: `API_TOKEN=${secret} node app.js` } });
   const report = await inspectProject(directory);
 
-  assert.ok(report.findings.some((finding) => finding.code === "posix-environment-assignment"));
+  const expectedFinding = process.platform === "win32" ? "analysis-inconclusive" : "posix-environment-assignment";
+  assert.ok(report.findings.some((finding) => finding.code === expectedFinding));
+  assert.equal(JSON.stringify(report).includes(secret), false);
 });
 
 test("reports a fatal finding for invalid package JSON", async () => {
@@ -120,12 +134,21 @@ test("reports a fatal finding when package.json is missing", async () => {
   assert.equal(report.findings[0].code, "package-json-not-found");
 });
 
-test("warns when the scripts section is missing", async () => {
+test("reports a missing scripts section as informational", async () => {
   const directory = await createProject({ name: "without-scripts" });
   const report = await inspectProject(directory);
 
   assert.equal(report.findings[0].code, "scripts-section-missing");
-  assert.equal(report.summary.warnings, 1);
+  assert.equal(report.findings[0].severity, "info");
+  assert.equal(report.summary.infos, 1);
+});
+
+test("reports an empty scripts object as informational", async () => {
+  const directory = await createProject({ name: "empty-scripts", scripts: {} });
+  const report = await inspectProject(directory);
+
+  assert.equal(report.findings[0].code, "scripts-section-empty");
+  assert.equal(report.summary.infos, 1);
 });
 
 test("does not report a dynamic npm script name as missing", async () => {
@@ -135,6 +158,38 @@ test("does not report a dynamic npm script name as missing", async () => {
   assert.ok(report.findings.some((finding) => finding.code === "npm-script-dynamic"));
   assert.equal(report.findings.some((finding) => finding.code === "npm-script-not-found"), false);
   assert.equal(report.summary.errors, 0);
+});
+
+test("recognizes percent-delimited dynamic npm script names", async () => {
+  const directory = await createProject({ scripts: { start: "npm run %TARGET%" } });
+  const report = await inspectProject(directory);
+
+  assert.ok(report.findings.some((finding) => finding.code === "npm-script-dynamic"));
+  assert.equal(report.findings.some((finding) => finding.code === "npm-script-not-found"), false);
+});
+
+test("does not report an absent optional npm script as an error", async () => {
+  const directory = await createProject({ scripts: { deploy: "npm run --if-present optional-deploy" } });
+  const report = await inspectProject(directory);
+
+  assert.ok(report.findings.some((finding) => finding.code === "npm-script-optional-missing"));
+  assert.equal(report.summary.errors, 0);
+});
+
+test("reports package-selecting npm options as inconclusive", async () => {
+  const directory = await createProject({ scripts: { deploy: "npm --prefix ./other run deploy" } });
+  const report = await inspectProject(directory);
+
+  assert.ok(report.findings.some((finding) => finding.code === "analysis-inconclusive"));
+  assert.equal(report.findings.some((finding) => finding.code === "npm-script-not-found"), false);
+});
+
+test("does not treat forwarded npm script arguments as npm options", async () => {
+  const directory = await createProject({ scripts: { deploy: "npm run build -- --workspace", build: "echo build" } });
+  const report = await inspectProject(directory);
+
+  assert.equal(report.findings.some((finding) => finding.code === "analysis-inconclusive"), false);
+  assert.equal(report.findings.some((finding) => finding.code === "npm-script-not-found"), false);
 });
 
 test("checks Node entries and npm scripts after a simple cd", async () => {
@@ -179,7 +234,7 @@ test("reports inconclusive when shell control syntax cannot be parsed", async ()
   assert.equal(report.findings.some((finding) => finding.code === "node-entry-not-found"), false);
 });
 
-test("recognizes a Windows-style relative Node entry path", async () => {
+test("handles Windows-style relative Node paths conservatively on each host", async () => {
   const directory = await createProject(
     { scripts: { start: "node .\\src\\index.js" } },
     { "src/index.js": "console.log('ready')" }
@@ -187,7 +242,68 @@ test("recognizes a Windows-style relative Node entry path", async () => {
   const report = await inspectProject(directory);
 
   assert.equal(report.findings.some((finding) => finding.code === "node-entry-not-found"), false);
-  assert.equal(report.findings.some((finding) => finding.code === "analysis-inconclusive"), false);
+  if (process.platform === "win32") {
+    assert.equal(report.findings.some((finding) => finding.code === "analysis-inconclusive"), false);
+  } else {
+    assert.ok(report.findings.some((finding) => finding.code === "analysis-inconclusive"));
+  }
+});
+
+test("tracks the Windows cmd.exe cd /d form", { skip: process.platform !== "win32" }, async () => {
+  const directory = await createProject(
+    { scripts: { start: "cd /d scripts && node entry.js" } },
+    { "scripts/entry.js": "" }
+  );
+  const report = await inspectProject(directory);
+
+  assert.equal(report.summary.errors, 0);
+  assert.equal(report.findings.length, 0);
+});
+
+test("does not assume Windows cd separators work in POSIX shells", async () => {
+  const directory = await createProject(
+    { scripts: { start: "cd .\\scripts && node missing.js" } },
+    { "scripts/entry.js": "" }
+  );
+  const report = await inspectProject(directory);
+
+  if (process.platform === "win32") {
+    assert.ok(report.findings.some((finding) => finding.code === "node-entry-not-found"));
+  } else {
+    assert.ok(report.findings.some((finding) => finding.code === "analysis-inconclusive"));
+    assert.equal(report.findings.some((finding) => finding.code === "node-entry-not-found"), false);
+  }
+});
+
+test("returns a structured fatal report when package.json is not a file", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "script-inspector-unusual-package-"));
+  temporaryDirectories.push(directory);
+  await mkdir(path.join(directory, "package.json"));
+
+  const report = await inspectProject(directory);
+  assert.equal(report.fatal, true);
+  assert.equal(report.findings[0].code, "package-json-not-file");
+});
+
+test("refuses to read a package.json symbolic link", { skip: process.platform === "win32" }, async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "script-inspector-symlink-"));
+  temporaryDirectories.push(directory);
+  const outsideFile = path.join(directory, "outside.json");
+  await writeFile(outsideFile, JSON.stringify({ scripts: { start: "node secret.js" } }));
+  await symlink(outsideFile, path.join(directory, "package.json"));
+
+  const report = await inspectProject(directory);
+  assert.equal(report.fatal, true);
+  assert.equal(report.findings[0].code, "package-json-symlink");
+});
+
+test("reports an inconclusive result for a looping entry symlink", { skip: process.platform === "win32" }, async () => {
+  const directory = await createProject({ scripts: { start: "node loop.js" } });
+  await symlink("loop.js", path.join(directory, "loop.js"));
+
+  const report = await inspectProject(directory);
+  assert.ok(report.findings.some((finding) => finding.code === "analysis-inconclusive"));
+  assert.equal(report.findings.some((finding) => finding.code === "node-entry-not-found"), false);
 });
 
 test("never executes a command found in package.json", async () => {

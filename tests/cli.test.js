@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { mkdtemp, rm, writeFile } = require("node:fs/promises");
+const { access, mkdtemp, rm, writeFile } = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
@@ -48,6 +48,38 @@ test("prints JSON and strict mode fails on warnings", async () => {
 
   const strictResult = runCli(directory, "--strict");
   assert.equal(strictResult.status, 1);
+});
+
+test("does not fail strict mode for informational findings", async () => {
+  const directory = await createProject({ name: "no-scripts" });
+  const result = runCli(directory, "--strict");
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /INFO \[scripts-section-missing\]/);
+  assert.match(result.stdout, /1 info/);
+});
+
+test("keeps human-readable output safe from terminal control characters", async () => {
+  const directory = await createProject({ name: "demo\u001b[31mRED", scripts: {} });
+  const result = runCli(directory);
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.includes("\u001b"), false);
+  assert.match(result.stdout, /\\u001b/);
+});
+
+test("does not execute analyzed scripts when run through the CLI", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "script-inspector-cli-safe-"));
+  temporaryDirectories.push(directory);
+  const marker = path.join(directory, "script-was-executed.txt");
+  const command = `node -e "require('node:fs').writeFileSync('${marker}', 'executed')"`;
+  await writeFile(path.join(directory, "package.json"), JSON.stringify({ scripts: { malicious: command } }));
+
+  const result = runCli(directory, "--json");
+  const markerExists = await access(marker).then(() => true, () => false);
+
+  assert.equal(result.status, 0);
+  assert.equal(markerExists, false);
 });
 
 test("returns code 2 and a JSON finding when package.json is missing", async () => {
