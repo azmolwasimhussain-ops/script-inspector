@@ -70,6 +70,22 @@ const UNSUPPORTED_SHELL_WORDS = new Set([
   "eval",
   "source"
 ]);
+const UNSUPPORTED_SCRIPT_RUNNERS = new Set(["pnpm", "yarn", "bun"]);
+const PACKAGE_MANAGER_OPTIONS_WITH_VALUE = new Map([
+  ["pnpm", new Set(["--filter", "-F", "--dir", "-C", "--config", "--reporter"])],
+  ["yarn", new Set(["--cwd", "--cache-folder", "--registry", "--network-timeout", "--use-yarnrc"])],
+  ["bun", new Set(["--cwd", "--config"])]
+]);
+const NPM_GLOBAL_OPTIONS_WITH_VALUE = new Set([
+  "--cache",
+  "--globalconfig",
+  "--registry",
+  "--userconfig",
+  "--prefix",
+  "--workspace",
+  "-w",
+  "--script-shell"
+]);
 
 function portableBasename(value) {
   return path.basename(value.replace(/\\/g, "/"));
@@ -86,11 +102,13 @@ function splitCommands(command) {
   const parts = [];
   let current = "";
   let quote = null;
+  let separatorBefore = null;
 
   function pushPart(separatorAfter) {
     const text = current.trim();
-    if (text) parts.push({ command: text, separatorAfter });
+    if (text) parts.push({ command: text, separatorBefore, separatorAfter });
     current = "";
+    separatorBefore = separatorAfter;
   }
 
   for (let index = 0; index < command.length; index += 1) {
@@ -232,7 +250,7 @@ function nodeEntryTarget(words) {
   for (let index = 1; index < words.length; index += 1) {
     const word = words[index];
     if (word === "--") return words[index + 1] ?? null;
-    if (NODE_OPTIONS_WITH_INLINE_CODE.has(word)) return null;
+    if (isNodeInlineCodeOption(word)) return null;
     if (NODE_OPTIONS_WITH_VALUE.has(word)) {
       index += 1;
       continue;
@@ -240,6 +258,37 @@ function nodeEntryTarget(words) {
     if (word.startsWith("--") && word.includes("=")) continue;
     if (word.startsWith("-")) continue;
     return word;
+  }
+
+  return null;
+}
+
+function isNodeInlineCodeOption(argument) {
+  return (
+    NODE_OPTIONS_WITH_INLINE_CODE.has(argument) ||
+    ["-e=", "--eval=", "-p=", "--print="].some((prefix) => argument.startsWith(prefix))
+  );
+}
+
+function nodeRunTarget(words) {
+  const executable = portableBasename(words[0]).replace(/\.exe$/i, "").toLowerCase();
+  if (executable !== "node") return null;
+
+  for (let index = 1; index < words.length; index += 1) {
+    const argument = words[index];
+    let name;
+
+    if (argument === "--run") name = words[index + 1] ?? null;
+    else if (argument.startsWith("--run=")) name = argument.slice("--run=".length);
+    else if (argument === "--" || !argument.startsWith("-")) return null;
+    else if (isNodeInlineCodeOption(argument)) return null;
+    else if (NODE_OPTIONS_WITH_VALUE.has(argument)) {
+      index += 1;
+      continue;
+    } else continue;
+
+    if (!name) return null;
+    return { name, dynamic: isDynamicValue(name), runner: "node --run" };
   }
 
   return null;
@@ -253,10 +302,14 @@ function npmRunTarget(words) {
   const executable = portableBasename(words[0]).replace(/\.(?:cmd|exe)$/i, "").toLowerCase();
   if (executable !== "npm") return null;
 
-  const runIndex = words.findIndex((word, index) => index > 0 && (word === "run" || word === "run-script"));
-  const execIndex = words.findIndex((word, index) => index > 0 && word === "exec");
-  if (execIndex !== -1 && (runIndex === -1 || execIndex < runIndex)) return null;
-  if (runIndex === -1) return null;
+  let runIndex = 1;
+  while (runIndex < words.length) {
+    const argument = words[runIndex];
+    if (argument === "run" || argument === "run-script") break;
+    if (!argument.startsWith("-")) return null;
+    runIndex += NPM_GLOBAL_OPTIONS_WITH_VALUE.has(argument) ? 2 : 1;
+  }
+  if (runIndex >= words.length) return null;
 
   const optionBoundary = words.indexOf("--");
   const allArguments = words.slice(1, optionBoundary === -1 ? words.length : optionBoundary);
@@ -289,8 +342,24 @@ function npmRunTarget(words) {
   return {
     name: target,
     dynamic: isDynamicValue(target),
-    optional: runOptions.includes("--if-present")
+    optional: runOptions.includes("--if-present"),
+    runner: "npm run"
   };
+}
+
+function unsupportedPackageManagerRun(words) {
+  const executable = portableBasename(words[0]).replace(/\.(?:cmd|exe)$/i, "").toLowerCase();
+  if (!UNSUPPORTED_SCRIPT_RUNNERS.has(executable)) return null;
+
+  const optionsWithValue = PACKAGE_MANAGER_OPTIONS_WITH_VALUE.get(executable);
+  for (let index = 1; index < words.length; index += 1) {
+    const argument = words[index];
+    if (argument === "run") return { runner: executable };
+    if (argument === "--" || !argument.startsWith("-")) return null;
+    index += optionsWithValue.has(argument) ? 1 : 0;
+  }
+
+  return null;
 }
 
 function normalizePath(target) {
@@ -359,8 +428,10 @@ module.exports = {
   isWindowsStylePath,
   normalizePath,
   nodeEntryTarget,
+  nodeRunTarget,
   npmRunTarget,
   shellWords,
   splitCommands,
+  unsupportedPackageManagerRun,
   unsupportedShellReason
 };

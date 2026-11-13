@@ -7,9 +7,11 @@ const {
   isWindowsStylePath,
   normalizePath,
   nodeEntryTarget,
+  nodeRunTarget,
   npmRunTarget,
   shellWords,
   splitCommands,
+  unsupportedPackageManagerRun,
   unsupportedShellReason
 } = require("./command-parser.js");
 
@@ -309,15 +311,16 @@ async function inspectProject(projectPath = process.cwd()) {
         if (!result.directory) {
           addInconclusiveFinding(findings, scriptName, undefined, result.reason);
           workingDirectory = null;
-        } else if (segment.separatorAfter === "||") {
+        } else if (segment.separatorBefore === "||" || segment.separatorAfter === "||") {
           addInconclusiveFinding(
             findings,
             scriptName,
             undefined,
-            "cd is followed by ||, so the next command may run from either directory."
+            "cd is conditional, so later commands may run from either directory."
           );
           workingDirectory = null;
         } else if (
+          segment.separatorBefore === "|" ||
           segment.separatorAfter === "|" ||
           (segment.separatorAfter === "&" && process.platform !== "win32")
         ) {
@@ -344,7 +347,20 @@ async function inspectProject(projectPath = process.cwd()) {
       }
 
       for (const entry of entries) {
-        const nestedRun = npmRunTarget(entry.words);
+        const unsupportedRunner = unsupportedPackageManagerRun(entry.words);
+        if (unsupportedRunner) {
+          addInconclusiveFinding(
+            findings,
+            scriptName,
+            undefined,
+            `the ${unsupportedRunner.runner} script command cannot be checked against this npm package's scripts.`
+          );
+          continue;
+        }
+
+        const nodeRun = nodeRunTarget(entry.words);
+        const nestedRun = npmRunTarget(entry.words) || nodeRun;
+        const isNodeRun = nestedRun?.runner === "node --run";
         if (nestedRun?.unsupported) {
           addInconclusiveFinding(
             findings,
@@ -355,10 +371,10 @@ async function inspectProject(projectPath = process.cwd()) {
         } else if (nestedRun?.dynamic) {
           addFinding(findings, {
             severity: "warning",
-            code: "npm-script-dynamic",
+            code: isNodeRun ? "node-run-script-dynamic" : "npm-script-dynamic",
             script: scriptName,
             target: nestedRun.name,
-            message: `Script "${scriptName}" runs npm with a dynamic script name; its target cannot be verified statically.`,
+            message: `Script "${scriptName}" runs ${nestedRun.runner} with a dynamic script name; its target cannot be verified statically.`,
             suggestion: "Check that the environment variable or shell expression resolves to a defined npm script."
           });
         } else if (nestedRun && (!workingDirectory || !isInsideProject(projectRoot, workingDirectory))) {
@@ -381,16 +397,18 @@ async function inspectProject(projectPath = process.cwd()) {
           } else {
             addFinding(findings, {
               severity: "error",
-              code: "npm-script-not-found",
+              code: isNodeRun ? "node-run-script-not-found" : "npm-script-not-found",
               script: scriptName,
               target: nestedRun.name,
-              message: `Script "${scriptName}" calls "npm run ${nestedRun.name}", but that script is not defined.`,
+              message: `Script "${scriptName}" calls "${nestedRun.runner} ${nestedRun.name}", but that script is not defined.`,
               suggestion: `Add a "${nestedRun.name}" entry to the scripts object or correct the script name.`
             });
           }
         }
 
-        const nodeTarget = nodeEntryTarget(entry.words);
+        // `node --run` consumes its script name and forwarded arguments; they are not
+        // Node entry-file paths.
+        const nodeTarget = nodeRun ? null : nodeEntryTarget(entry.words);
         if (nodeTarget) {
           if (!workingDirectory) {
             addInconclusiveFinding(
