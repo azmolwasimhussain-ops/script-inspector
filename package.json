@@ -11,13 +11,14 @@
     "url": "https://github.com/azmolwasimhussain-ops/script-inspector/issues"
   },
   "homepage": "https://github.com/azmolwasimhussain-ops/script-inspector#readme",
-  "type": "module",
+  "type": "commonjs",
   "main": "./src/index.js",
   "types": "./src/index.d.ts",
   "exports": {
     ".": {
       "types": "./src/index.d.ts",
-      "import": "./src/index.js"
+      "require": "./src/index.js",
+      "default": "./src/index.js"
     }
   },
   "bin": {

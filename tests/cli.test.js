@@ -1,22 +1,29 @@
-import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { spawnSync } from "node:child_process";
-import { afterEach, test } from "node:test";
-import { fileURLToPath } from "node:url";
+const assert = require("node:assert/strict");
+const { mkdtemp, rm, writeFile } = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const { afterEach, test } = require("node:test");
 
-const cliPath = fileURLToPath(new URL("../bin/script-inspector.js", import.meta.url));
+const cliPath = path.join(__dirname, "..", "bin", "script-inspector.js");
 const temporaryDirectories = [];
 
-async function createProject(scripts, extra = {}) {
+async function createProject(packageJson) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "script-inspector-cli-"));
   temporaryDirectories.push(directory);
-  await writeFile(
-    path.join(directory, "package.json"),
-    JSON.stringify({ name: "cli-fixture", scripts, ...extra }, null, 2)
-  );
+  await writeFile(path.join(directory, "package.json"), JSON.stringify(packageJson, null, 2));
   return directory;
+}
+
+async function createProjectWithRawPackageJson(source) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "script-inspector-cli-json-"));
+  temporaryDirectories.push(directory);
+  await writeFile(path.join(directory, "package.json"), source);
+  return directory;
+}
+
+function runCli(directory, ...argumentsList) {
+  return spawnSync(process.execPath, [cliPath, directory, ...argumentsList], { encoding: "utf8" });
 }
 
 afterEach(async () => {
@@ -24,21 +31,40 @@ afterEach(async () => {
 });
 
 test("prints findings and returns code 1 for script errors", async () => {
-  const directory = await createProject({ dev: "node src/missing.js" });
-  const result = spawnSync(process.execPath, [cliPath, directory], { encoding: "utf8" });
+  const directory = await createProject({ scripts: { dev: "node src/missing.js" } });
+  const result = runCli(directory);
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /node-entry-not-found/);
 });
 
 test("prints JSON and strict mode fails on warnings", async () => {
-  const directory = await createProject({ build: "vite build" });
-  const jsonResult = spawnSync(process.execPath, [cliPath, directory, "--json"], { encoding: "utf8" });
+  const directory = await createProject({ scripts: { build: "vite build" } });
+  const jsonResult = runCli(directory, "--json");
   const report = JSON.parse(jsonResult.stdout);
 
   assert.equal(jsonResult.status, 0);
   assert.equal(report.findings[0].code, "cli-dependency-not-declared");
 
-  const strictResult = spawnSync(process.execPath, [cliPath, directory, "--strict"], { encoding: "utf8" });
+  const strictResult = runCli(directory, "--strict");
   assert.equal(strictResult.status, 1);
+});
+
+test("returns code 2 and a JSON finding when package.json is missing", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "script-inspector-cli-no-package-"));
+  temporaryDirectories.push(directory);
+  const result = runCli(directory, "--json");
+  const report = JSON.parse(result.stdout);
+
+  assert.equal(result.status, 2);
+  assert.equal(report.findings[0].code, "package-json-not-found");
+});
+
+test("returns code 2 and a JSON finding for invalid package.json", async () => {
+  const directory = await createProjectWithRawPackageJson("{ invalid }");
+  const result = runCli(directory, "--json");
+  const report = JSON.parse(result.stdout);
+
+  assert.equal(result.status, 2);
+  assert.equal(report.findings[0].code, "package-json-invalid");
 });

@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import { inspectProject } from "../src/inspect.js";
+const { readFileSync } = require("node:fs");
+const path = require("node:path");
+const { inspectProject } = require("../src/inspect.js");
 
-const packageJsonPath = fileURLToPath(new URL("../package.json", import.meta.url));
+const packageJsonPath = path.join(__dirname, "..", "package.json");
 const packageVersion = JSON.parse(readFileSync(packageJsonPath, "utf8")).version;
 
 function usage() {
@@ -81,16 +80,25 @@ function printHumanReport(report) {
   console.log(`Summary: ${report.summary.errors} error(s), ${report.summary.warnings} warning(s).`);
 }
 
-const parsed = parseArguments(process.argv.slice(2));
-if (parsed.error) {
-  console.error(`script-inspector: ${parsed.error}`);
-  console.error("Run script-inspector --help for usage.");
-  process.exitCode = 2;
-} else if (parsed.options.help) {
-  console.log(usage());
-} else if (parsed.options.version) {
-  console.log(packageVersion);
-} else {
+async function main() {
+  const parsed = parseArguments(process.argv.slice(2));
+  if (parsed.error) {
+    console.error(`script-inspector: ${parsed.error}`);
+    console.error("Run script-inspector --help for usage.");
+    process.exitCode = 2;
+    return;
+  }
+
+  if (parsed.options.help) {
+    console.log(usage());
+    return;
+  }
+
+  if (parsed.options.version) {
+    console.log(packageVersion);
+    return;
+  }
+
   try {
     const report = await inspectProject(parsed.options.projectPath);
     if (parsed.options.json) console.log(JSON.stringify(report, null, 2));
@@ -105,3 +113,8 @@ if (parsed.error) {
     process.exitCode = 2;
   }
 }
+
+main().catch((error) => {
+  console.error(`script-inspector: ${error.message}`);
+  process.exitCode = 2;
+});

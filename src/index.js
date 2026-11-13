@@ -1,1 +1,3 @@
-export { inspectProject } from "./inspect.js";
+const { inspectProject } = require("./inspect.js");
+
+module.exports = { inspectProject };

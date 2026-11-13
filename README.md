@@ -6,6 +6,10 @@ Inspect a Node.js project's `package.json` scripts for common setup problems bef
 
 **Repository:** [azmolwasimhussain-ops/script-inspector](https://github.com/azmolwasimhussain-ops/script-inspector) · [Issues](https://github.com/azmolwasimhussain-ops/script-inspector/issues)
 
+## Requirements
+
+- Node.js 18 or newer.
+
 ## Installation
 
 Install it as a development dependency:
@@ -70,10 +74,12 @@ To check it automatically in CI, add a script to your own `package.json`:
 
 - **Missing Node.js entry files:** checks literal file targets in common commands such as `node src/index.js`.
 - **Missing npm scripts:** checks simple nested calls such as `npm run build` against the project's scripts object.
+- **Dynamic npm script names:** warns when a variable or shell expression chooses the nested script name, because its value cannot be checked statically.
+- **Working-directory changes:** follows simple `cd` commands when the target directory exists and resolves later relative Node.js entry paths from there.
 - **Undeclared common CLI tools:** warns when recognized tools such as Vite, ESLint, TypeScript, Jest, or Vitest are used without the matching package in the manifest.
 - **POSIX environment assignments:** warns about forms such as `NODE_ENV=production node app.js`, which may not work in Windows shells.
 
-The checker understands common command separators (`&&`, `||`, `;`, and `|`) and quoted arguments. It does not try to understand every shell, wrapper, workspace setup, dynamic variable, or custom executable. Findings are static hints; commands are never run.
+The checker understands common command separators (`&&`, `||`, `;`, and `|`) and quoted arguments. It normalizes Windows-style relative paths such as `node .\src\index.js`, but it is not a complete Windows or POSIX shell parser. Unsupported shell syntax and paths that cannot be resolved produce an `analysis-inconclusive` warning. Findings are static hints; commands are never run.
 
 ## Exit codes
 
@@ -84,11 +90,12 @@ The checker understands common command separators (`&&`, `||`, `;`, and `|`) and
 ## JavaScript API
 
 ```js
-import { inspectProject } from "script-inspector";
+const { inspectProject } = require("script-inspector");
 
-const report = await inspectProject("./my-app");
-console.log(report.summary);
-console.log(report.findings);
+inspectProject("./my-app").then((report) => {
+  console.log(report.summary);
+  console.log(report.findings);
+});
 ```
 
 `inspectProject(projectPath)` accepts a project directory or a path to `package.json`. It returns the project path, the number of scripts inspected, a `fatal` flag, a findings array, and error/warning counts.
@@ -105,7 +112,7 @@ The test suite uses Node.js's built-in test runner, so the package has no runtim
 
 ## Limitations
 
-This is a static checker, not a shell interpreter. It only checks known command patterns and a curated list of common CLI packages. Complex shell expressions may be skipped or may need a human review. A warning means the package is not declared in this package's manifest; it may still be supplied by a workspace or the user's machine.
+This is a static checker, not a shell interpreter. It only checks known command patterns and a curated list of common CLI packages. Complex shell expressions may need a human review; the checker reports when it cannot reliably determine a working directory or target. Windows-style relative entry paths are normalized, but full Windows shell behavior is not supported. A dependency warning means the package is not declared in this package's manifest; it may still be supplied by a workspace or the user's machine.
 
 ## Contributing
 
