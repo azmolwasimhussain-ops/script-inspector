@@ -182,6 +182,7 @@ This is a static analyzer. It does not spawn processes, invoke a shell, install 
 
 - Shell commands are parsed with a small, conservative parser; this is not a shell interpreter.
 - Complex shell syntax, variable expansion, workspace selection, and commands whose working directory cannot be determined may be reported as inconclusive.
+- If a command changes into a directory with its own `package.json`, nested script checks are reported as inconclusive; nested manifests are not inspected.
 - The dependency check uses a curated list of common binaries. It cannot know whether a tool is supplied globally, by a workspace, or by the environment.
 - A path's existence does not guarantee that it is valid JavaScript or that the command will succeed.
 - Windows checks are run under the host's default Node/npm shell assumptions; PowerShell and arbitrary custom script shells are not fully interpreted.

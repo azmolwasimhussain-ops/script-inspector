@@ -58,6 +58,16 @@ function addInconclusiveFinding(findings, scriptName, target, reason) {
   });
 }
 
+async function packageManifestStatus(directory) {
+  try {
+    await lstat(path.join(directory, "package.json"));
+    return "present";
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return "missing";
+    return "unknown";
+  }
+}
+
 async function fileExists(workingDirectory, target) {
   if (isDynamicPath(target)) return { exists: null, reason: "the target path is dynamic." };
   if (process.platform !== "win32" && isWindowsStylePath(target)) {
@@ -361,6 +371,13 @@ async function inspectProject(projectPath = process.cwd()) {
         const nodeRun = nodeRunTarget(entry.words);
         const nestedRun = npmRunTarget(entry.words) || nodeRun;
         const isNodeRun = nestedRun?.runner === "node --run";
+        const cwdPackageStatus =
+          nestedRun &&
+          workingDirectory &&
+          isInsideProject(projectRoot, workingDirectory) &&
+          workingDirectory !== projectRoot
+            ? await packageManifestStatus(workingDirectory)
+            : "not-checked";
         if (nestedRun?.unsupported) {
           addInconclusiveFinding(
             findings,
@@ -383,6 +400,20 @@ async function inspectProject(projectPath = process.cwd()) {
             scriptName,
             nestedRun.name,
             "the current directory is unknown or outside the inspected project, so the npm package containing this script cannot be identified."
+          );
+        } else if (nestedRun && cwdPackageStatus === "present") {
+          addInconclusiveFinding(
+            findings,
+            scriptName,
+            nestedRun.name,
+            "the current directory has its own package.json, which is not the manifest being inspected."
+          );
+        } else if (nestedRun && cwdPackageStatus === "unknown") {
+          addInconclusiveFinding(
+            findings,
+            scriptName,
+            nestedRun.name,
+            "the package.json in the current directory could not be checked."
           );
         } else if (nestedRun && !Object.hasOwn(scripts, nestedRun.name)) {
           if (nestedRun.optional) {

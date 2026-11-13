@@ -315,6 +315,24 @@ test("checks Node entries and npm scripts after a simple cd", async () => {
   assert.equal(report.findings.some((finding) => finding.code === "analysis-inconclusive"), false);
 });
 
+test("does not check nested scripts against the root manifest after entering another package", async () => {
+  const directory = await createProject(
+    {
+      scripts: {
+        npmTarget: "cd packages/app && npm run lint",
+        nodeTarget: "cd packages/app && node --run lint",
+        lint: "echo root lint"
+      }
+    },
+    { "packages/app/package.json": JSON.stringify({ scripts: {} }) }
+  );
+  const report = await inspectProject(directory);
+
+  assert.equal(report.findings.filter((finding) => finding.code === "analysis-inconclusive").length, 2);
+  assert.equal(report.findings.some((finding) => finding.code === "npm-script-not-found"), false);
+  assert.equal(report.findings.some((finding) => finding.code === "node-run-script-not-found"), false);
+});
+
 test("does not assume a cd after || always changes the working directory", async () => {
   const directory = await createProject(
     { scripts: { start: "true || cd scripts && node entry.js" } },
