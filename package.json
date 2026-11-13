@@ -2,6 +2,7 @@
   "name": "script-inspector",
   "version": "0.1.0",
   "description": "Inspect package.json scripts for common Node.js setup issues without running them.",
+  "author": "Azmol Wasim Hussain",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -31,14 +32,16 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "keywords": [
     "npm",
     "package-json",
     "scripts",
     "cli",
-    "developer-tools"
+    "developer-tools",
+    "static-analysis",
+    "nodejs"
   ],
   "scripts": {
     "test": "node --test"
