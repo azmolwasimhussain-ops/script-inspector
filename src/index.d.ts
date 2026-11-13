@@ -1,4 +1,4 @@
-export type FindingSeverity = "error" | "warning";
+export type FindingSeverity = "error" | "warning" | "info";
 
 export interface ScriptFinding {
   severity: FindingSeverity;
@@ -20,6 +20,7 @@ export interface InspectionReport {
   summary: {
     errors: number;
     warnings: number;
+    infos: number;
   };
 }
 

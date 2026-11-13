@@ -56,34 +56,46 @@ function parseArguments(args) {
   return { options };
 }
 
+function terminalSafe(value) {
+  return String(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, (character) => {
+    return `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`;
+  });
+}
+
+function countLabel(count, singular) {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
 function printHumanReport(report) {
   if (report.fatal) {
     const finding = report.findings[0];
-    console.error(`ERROR [${finding.code}] ${finding.message}`);
-    console.error(`  Fix: ${finding.suggestion}`);
+    console.error(`ERROR [${terminalSafe(finding.code)}] ${terminalSafe(finding.message)}`);
+    console.error(`  Fix: ${terminalSafe(finding.suggestion)}`);
     return;
   }
 
-  console.log(`script-inspector: ${report.packageName ?? "unnamed package"}`);
+  console.log(`script-inspector: ${terminalSafe(report.packageName ?? "unnamed package")}`);
   console.log(`Checked ${report.scriptsChecked} script${report.scriptsChecked === 1 ? "" : "s"}.`);
 
   if (report.findings.length === 0) {
     console.log(report.scriptsChecked === 0 ? "No npm scripts are defined." : "No issues found.");
   } else {
     for (const finding of report.findings) {
-      const label = finding.severity.toUpperCase();
-      console.log(`${label} [${finding.code}] ${finding.message}`);
-      if (finding.suggestion) console.log(`  Fix: ${finding.suggestion}`);
+      const label = terminalSafe(finding.severity.toUpperCase());
+      console.log(`${label} [${terminalSafe(finding.code)}] ${terminalSafe(finding.message)}`);
+      if (finding.suggestion) console.log(`  Fix: ${terminalSafe(finding.suggestion)}`);
     }
   }
 
-  console.log(`Summary: ${report.summary.errors} error(s), ${report.summary.warnings} warning(s).`);
+  console.log(
+    `Summary: ${countLabel(report.summary.errors, "error")}, ${countLabel(report.summary.warnings, "warning")}, ${countLabel(report.summary.infos, "informational finding")}.`
+  );
 }
 
 async function main() {
   const parsed = parseArguments(process.argv.slice(2));
   if (parsed.error) {
-    console.error(`script-inspector: ${parsed.error}`);
+    console.error(`script-inspector: ${terminalSafe(parsed.error)}`);
     console.error("Run script-inspector --help for usage.");
     process.exitCode = 2;
     return;
@@ -109,12 +121,12 @@ async function main() {
       process.exitCode = 1;
     }
   } catch (error) {
-    console.error(`script-inspector: ${error.message}`);
+    console.error(`script-inspector: ${terminalSafe(error.message)}`);
     process.exitCode = 2;
   }
 }
 
 main().catch((error) => {
-  console.error(`script-inspector: ${error.message}`);
+  console.error(`script-inspector: ${terminalSafe(error.message)}`);
   process.exitCode = 2;
 });
