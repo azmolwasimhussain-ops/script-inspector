@@ -8,7 +8,7 @@ Inspect a Node.js project's `package.json` scripts for common setup problems bef
 
 ## Installation
 
-After the package is published:
+Install it as a development dependency:
 
 ```sh
 npm install --save-dev script-inspector
